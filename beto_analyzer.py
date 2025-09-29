@@ -1,4 +1,3 @@
-# backend/beto_analyzer.py
 import pandas as pd
 from transformers import pipeline
 from tqdm import tqdm
@@ -8,32 +7,48 @@ from wordcloud import WordCloud
 import base64
 from io import BytesIO
 
-# Configuración inicial
+# Inicializar la variable global del analizador a None
+analyzer = None
 tqdm.pandas()
-analyzer = pipeline(
-    "text-classification",
-    model="finiteautomata/beto-sentiment-analysis",
-    tokenizer="finiteautomata/beto-sentiment-analysis"
-)
+
+def get_analyzer():
+    """Carga el modelo BETO solo si aún no ha sido cargado (Lazy Loading)."""
+    global analyzer
+    if analyzer is None:
+        # Nota: En los logs de Render, busca este mensaje para saber cuándo se carga.
+        print("⏳ Inicializando modelo BETO (Esto puede tardar unos segundos)...")
+        try:
+            analyzer = pipeline(
+                "text-classification",
+                model="finiteautomata/beto-sentiment-analysis",
+                tokenizer="finiteautomata/beto-sentiment-analysis"
+            )
+            print("✅ Modelo BETO inicializado.")
+        except Exception as e:
+            print(f"❌ ERROR al cargar el modelo BETO: {e}")
+            # Considera elevar HTTPException aquí si el modelo es vital
+            raise
+    return analyzer
 
 def analyze_with_beto(reviews_df):
     """
     Aplica el análisis de sentimiento con el modelo BETO a un DataFrame de reseñas.
-    Args:
-        reviews_df (pd.DataFrame): DataFrame con la columna 'review'.
-    Returns:
-        pd.DataFrame: DataFrame con la predicción de BETO.
     """
+    # 🛑 CAMBIO CLAVE: Carga el modelo si es la primera llamada
+    model_analyzer = get_analyzer() 
+    
     if not isinstance(reviews_df, pd.DataFrame):
-        reviews_df = pd.read_excel(reviews_df)
+        # Esta línea puede fallar en Render si la ruta es incorrecta.
+        # Asumiendo que `reviews_df` SIEMPRE es un DataFrame pasado por FastAPI.
+        reviews_df = pd.read_excel(reviews_df) 
     
     def _clasificar_con_beto(texto):
         try:
-            # Limitar a 512 tokens para evitar errores
-            result = analyzer(str(texto)[:512])
+            # Limitar a 512 tokens
+            result = model_analyzer(str(texto)[:512])
             return result[0]['label'].lower()
         except:
-            return 'neutro' # Manejo de errores para texto vacío o problemático
+            return 'neutro'
 
     reviews_df['review_clean'] = reviews_df['review'].astype(str).str.strip()
     print("🔍 Analizando reseñas con BETO...")
@@ -52,10 +67,6 @@ def analyze_with_beto(reviews_df):
 def generate_beto_plots(df_reviews):
     """
     Genera y devuelve los gráficos de análisis de BETO en formato Base64.
-    Args:
-        df_reviews (pd.DataFrame): DataFrame con resultados del análisis.
-    Returns:
-        dict: Diccionario con nombres de gráficos y sus datos en Base64.
     """
     plots = {}
     
